@@ -27,45 +27,91 @@ namespace AuthorizationsSso.Controllers
                 using (var db = new AuthDbContext())
                 {
                     IFormCollection form = await Request.ReadFormAsync();
-                    string code = form["code"];
+                    string grant_type = form["grant_type"];
 
-                    LogHelper.WriteToLogFile("api/Authorization: code=" + code);
-
-                    if (string.IsNullOrEmpty(code))
-                        return BadRequest(new { error = "code пустой" });
-
-                    var authorization = db.Authorizations.SingleOrDefault(r => r.AccessCode == code);
-
-                    if (authorization == null)
-                        return BadRequest(new { error = "code неправильный" + code });
-
-                    // if (authorization.CreatedDate.AddMinutes(5) < DateTime.Now)
-                    //     return BadRequest(new { error = "Срок действии code истек" });
-
-                    var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
-                    var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-                    var Sectoken = new JwtSecurityToken(_config["Jwt:Issuer"],
-                      _config["Jwt:Issuer"],
-                      null,
-                      expires: DateTime.Now.AddMinutes(1),
-                      signingCredentials: credentials);
-
-                    var token = new JwtSecurityTokenHandler().WriteToken(Sectoken);
-                    authorization.AccessToken = token;
-                    authorization.RefreshToken = AccessCodeHelper.GenerateAccessCode();
-
-                    db.SaveChanges();
-
-                    var dtoToken = new DtoToken
+                    if (grant_type == "authorization_code")
                     {
-                        access_token = authorization.AccessToken,
-                        refresh_token = authorization.RefreshToken,
-                        expires_in = TimeHelper.GetTimeStamp(DateTime.Now.AddMinutes(5)),
-                        expires = TimeHelper.GetTimeStamp(DateTime.Now.AddHours(3))
-                    };
+                        string code = form["code"];
+                        LogHelper.WriteToLogFile("api/Authorization: code=" + code);
 
-                    return Ok(dtoToken);
+                        if (string.IsNullOrEmpty(code))
+                            return BadRequest(new { error = "code пустой" });
+
+                        var authorization = db.Authorizations.SingleOrDefault(r => r.AccessCode == code);
+
+                        if (authorization == null)
+                            return BadRequest(new { error = "code неправильный" + code });
+
+                        // if (authorization.CreatedDate.AddMinutes(5) < DateTime.Now)
+                        //     return BadRequest(new { error = "Срок действии code истек" });
+
+                        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+                        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+                        var Sectoken = new JwtSecurityToken(_config["Jwt:Issuer"],
+                        _config["Jwt:Issuer"],
+                        null,
+                        expires: DateTime.Now.AddMinutes(1),
+                        signingCredentials: credentials);
+
+                        var token = new JwtSecurityTokenHandler().WriteToken(Sectoken);
+                        authorization.AccessToken = token;
+                        authorization.RefreshToken = AccessCodeHelper.GenerateAccessCode();
+
+                        db.SaveChanges();
+
+                        var dtoToken = new DtoToken
+                        {
+                            access_token = authorization.AccessToken,
+                            refresh_token = authorization.RefreshToken,
+                            expires_in = TimeHelper.GetTimeStamp(DateTime.Now.AddMinutes(5)),
+                            expires = TimeHelper.GetTimeStamp(DateTime.Now.AddHours(3))
+                        };
+
+                        return Ok(dtoToken);
+                    }
+                    else 
+                    {
+                        string? refreshToken = form["refresh_token"];
+                        LogHelper.WriteToLogFile("api/Authorization: refreshToken=" + refreshToken);
+
+                        if (string.IsNullOrEmpty(refreshToken))
+                            return BadRequest(new { error = "refresh_token пустой!" });
+
+                        if (!db.Authorizations.Any(r => r.RefreshToken == refreshToken))
+                            return Ok(new { error = "refresh_token token неактуальный!" });
+
+                        var authorization = db.Authorizations.Single(r => r.RefreshToken == refreshToken);
+                        if (authorization.CreatedDate.AddHours(2) < DateTime.Now)
+                            return Ok(new { error = "refresh_token token просрочен" });
+
+                        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+                        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+                        var Sectoken = new JwtSecurityToken(_config["Jwt:Issuer"],
+                        _config["Jwt:Issuer"],
+                        null,
+                        expires: DateTime.Now.AddMinutes(1),
+                        signingCredentials: credentials);
+
+                        var token = new JwtSecurityTokenHandler().WriteToken(Sectoken);
+
+                        authorization.CreatedDate = DateTime.Now;
+                        authorization.AccessToken = token;
+                        authorization.AccessCode = null;
+                        authorization.RefreshToken = AccessCodeHelper.GenerateAccessCode();
+
+                        db.SaveChanges();
+
+                        var dtoToken = new DtoToken
+                        {
+                            access_token = authorization.AccessToken,
+                            refresh_token = authorization.RefreshToken,
+                            expires_in = TimeHelper.GetTimeStamp(DateTime.Now.AddMinutes(5)),
+                            expires = TimeHelper.GetTimeStamp(DateTime.Now.AddHours(3))
+                        };
+                        return Ok(dtoToken);
+                    }
                 }
             }
             catch (Exception ex)
@@ -74,54 +120,13 @@ namespace AuthorizationsSso.Controllers
             }
         }
 
-        [HttpPost]
-        [Route("GetNewAccessToken")]
-        public async Task<IActionResult> GetNewAccessToken()
-        {
-            IFormCollection form = await Request.ReadFormAsync();
-            string? refreshToken = form["refresh_token"];
-
-            if (string.IsNullOrEmpty(refreshToken))
-                return BadRequest("refresh_token пустой!");
-
-            using (var db = new AuthDbContext())
-            {
-                if (!db.Authorizations.Any(r => r.RefreshToken == refreshToken))
-                    return Ok("refresh_token token неактуальный!");
-
-                var authorization = db.Authorizations.Single(r => r.RefreshToken == refreshToken);
-                if (authorization.CreatedDate.AddHours(2) < DateTime.Now)
-                    return Ok("refresh_token token просрочен");
-
-                var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
-                var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-                var Sectoken = new JwtSecurityToken(_config["Jwt:Issuer"],
-                  _config["Jwt:Issuer"],
-                  null,
-                  expires: DateTime.Now.AddMinutes(1),
-                  signingCredentials: credentials);
-
-                var token = new JwtSecurityTokenHandler().WriteToken(Sectoken);
-
-                authorization.CreatedDate = DateTime.Now;
-                authorization.AccessToken = token;
-                authorization.AccessCode = null;
-                authorization.RefreshToken = AccessCodeHelper.GenerateAccessCode();
-
-                db.SaveChanges();
-
-                var dtoToken = new DtoToken
-                {
-                    access_token = authorization.AccessToken,
-                    refresh_token = authorization.RefreshToken,
-                    expires_in = TimeHelper.GetTimeStamp(DateTime.Now.AddMinutes(5)),
-                    expires = TimeHelper.GetTimeStamp(DateTime.Now.AddHours(3))
-                };
-
-                return Ok(dtoToken);
-            }
-        }
+        // [HttpPost]
+        // [Route("GetNewAccessToken")]
+        // public async Task<IActionResult> GetNewAccessToken()
+        // {
+        //     IFormCollection form = await Request.ReadFormAsync();
+            
+        // }
     }
 
     public class DtoToken

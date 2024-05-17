@@ -77,6 +77,6 @@ namespace AuthorizationsSso.Controllers
             LogHelper.WriteToLogFile(message);
             return Ok(message);
         }
+        
     }
-
 }

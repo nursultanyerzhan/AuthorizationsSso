@@ -24,12 +24,12 @@ namespace AuthorizationsSso.Controllers
                 using (var db = new AuthDbContext())
                 {
                     if (!db.AuthorizationAppClients.Any(r => r.ClientId == client_id && redirect_uri.Contains(r.RedirectUri)))
-                        return BadRequest(new { state });
+                        return BadRequest(new { error = "Недопустимый url, state = " + state });
 
                     var authorization = db.Authorizations.SingleOrDefault(r => r.Id == authUnique);
 
                     if (authorization == null)
-                        return BadRequest("В базе данных отсутствует запись с authUnique = " + authUnique);
+                        return BadRequest(new {error = "В базе данных отсутствует запись с authUnique = " + authUnique});
 
                     var accessCode = AccessCodeHelper.GenerateAccessCode();
 

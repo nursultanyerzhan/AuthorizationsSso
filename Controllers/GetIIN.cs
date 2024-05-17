@@ -39,7 +39,7 @@ namespace AuthorizationsSso.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, JsonConvert.SerializeObject(ex));
+                return BadRequest(new { error = "У вас отсутствует ИИН В базе" });
             }
         }
     }
